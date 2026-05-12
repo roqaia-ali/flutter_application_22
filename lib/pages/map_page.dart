@@ -1,82 +1,120 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter_map/flutter_map.dart';
 
 class MapPage extends StatefulWidget {
-  final List<LatLng> routePoints;
-  const MapPage({super.key, required this.routePoints});
+  const MapPage({super.key, required List<LatLng> routePoints});
 
   @override
   State<MapPage> createState() => _MapPageState();
 }
 
 class _MapPageState extends State<MapPage> {
+  final MapController _mapController = MapController();
+
+  List<LatLng> routePoints = [];
+
+  StreamSubscription<Position>? _positionStream;
+
   String? localPath;
 
   @override
   void initState() {
     super.initState();
     _prepareMapPath();
+    _startTracking();
   }
 
   Future<void> _prepareMapPath() async {
     final directory = await getApplicationDocumentsDirectory();
+
     setState(() {
-      // تأكد إن المسار بيوصل للي جواه مجلدات (12, 13..)
       localPath = '${directory.path}/offline_maps/Fayom';
     });
   }
 
+  void _startTracking() {
+    _positionStream =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 3,
+          ),
+        ).listen((pos) {
+          final newPoint = LatLng(pos.latitude, pos.longitude);
+
+          setState(() {
+            routePoints.add(newPoint);
+          });
+
+          // تحريك الخريطة للموقع الحالي
+          _mapController.move(newPoint, 17);
+        });
+  }
+
+  @override
+  void dispose() {
+    _positionStream?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final LatLng initialPos = widget.routePoints.isNotEmpty
-        ? widget.routePoints.last
+    final LatLng initialPos = routePoints.isNotEmpty
+        ? routePoints.last
         : const LatLng(29.3197, 30.8357);
 
     return Scaffold(
       backgroundColor: Colors.black,
+
       appBar: AppBar(
-        title: const Text("OFFLINE MAP"),
+        title: const Text("LIVE GPS TRACKING"),
         backgroundColor: Colors.black,
       ),
+
       body: localPath == null
-          ? const Center(
-              child: CircularProgressIndicator(color: Colors.cyanAccent),
-            )
+          ? const Center(child: CircularProgressIndicator())
           : FlutterMap(
+              mapController: _mapController,
+
               options: MapOptions(
                 initialCenter: initialPos,
-                initialZoom: 14,
+                initialZoom: 16,
                 minZoom: 12,
                 maxZoom: 18,
               ),
+
               children: [
                 TileLayer(
                   tileProvider: FileTileProvider(),
                   urlTemplate: '$localPath/{z}/{x}/{y}.png',
-                
                 ),
+
+                // رسم المسار
                 PolylineLayer(
                   polylines: [
                     Polyline(
-                      points: widget.routePoints,
+                      points: routePoints,
                       strokeWidth: 5,
                       color: Colors.cyanAccent,
                     ),
                   ],
                 ),
-                if (widget.routePoints.isNotEmpty)
+
+                // الماركر الحالي
+                if (routePoints.isNotEmpty)
                   MarkerLayer(
                     markers: [
                       Marker(
-                        point: widget.routePoints.last,
+                        point: routePoints.last,
                         width: 40,
                         height: 40,
                         child: const Icon(
-                          Icons.location_on,
+                          Icons.navigation,
                           color: Colors.red,
                           size: 40,
                         ),
