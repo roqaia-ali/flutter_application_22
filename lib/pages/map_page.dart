@@ -1,126 +1,111 @@
-import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
 
 class MapPage extends StatefulWidget {
-  const MapPage({super.key, required List<LatLng> routePoints});
+  final List<LatLng> routePoints;
+
+  const MapPage({super.key, required this.routePoints});
 
   @override
   State<MapPage> createState() => _MapPageState();
 }
 
 class _MapPageState extends State<MapPage> {
+  String? _localPath;
   final MapController _mapController = MapController();
 
-  List<LatLng> routePoints = [];
-
-  StreamSubscription<Position>? _positionStream;
-
-  String? localPath;
+  bool _follow = true; // 🔥 جديد فقط
 
   @override
   void initState() {
     super.initState();
-    _prepareMapPath();
-    _startTracking();
+    _initPath();
   }
 
-  Future<void> _prepareMapPath() async {
+  Future<void> _initPath() async {
     final directory = await getApplicationDocumentsDirectory();
-
     setState(() {
-      localPath = '${directory.path}/offline_maps/Fayom';
+      _localPath = '${directory.path}/offline_maps/Fayom';
     });
   }
 
-  void _startTracking() {
-    _positionStream =
-        Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            distanceFilter: 3,
-          ),
-        ).listen((pos) {
-          final newPoint = LatLng(pos.latitude, pos.longitude);
-
-          setState(() {
-            routePoints.add(newPoint);
-          });
-
-          // تحريك الخريطة للموقع الحالي
-          _mapController.move(newPoint, 17);
-        });
-  }
-
   @override
-  void dispose() {
-    _positionStream?.cancel();
-    super.dispose();
+  void didUpdateWidget(covariant MapPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // 🔥 LIVE TRACKING (الجزء المهم)
+    if (_follow && widget.routePoints.isNotEmpty) {
+      _mapController.move(widget.routePoints.last, _mapController.camera.zoom);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final LatLng initialPos = routePoints.isNotEmpty
-        ? routePoints.last
-        : const LatLng(29.3197, 30.8357);
+    const LatLng fayoumCenter = LatLng(29.3084, 30.8428);
+
+    final LatLng currentMarkerPoint = widget.routePoints.isNotEmpty
+        ? widget.routePoints.last
+        : fayoumCenter;
 
     return Scaffold(
-      backgroundColor: Colors.black,
-
       appBar: AppBar(
-        title: const Text("LIVE GPS TRACKING"),
+        title: const Text("OFFLINE MAP"),
         backgroundColor: Colors.black,
+        actions: [
+          // 🔥 زر تشغيل/إيقاف الـ follow
+         
+
+          // زر الرجوع للمكان
+          IconButton(
+            icon: const Icon(Icons.my_location),
+            onPressed: () {
+              _mapController.move(currentMarkerPoint, 15);
+            },
+          ),
+        ],
       ),
 
-      body: localPath == null
+      body: _localPath == null
           ? const Center(child: CircularProgressIndicator())
           : FlutterMap(
               mapController: _mapController,
-
               options: MapOptions(
-                initialCenter: initialPos,
-                initialZoom: 16,
-                minZoom: 12,
-                maxZoom: 18,
+                initialCenter: fayoumCenter,
+                initialZoom: 14,
               ),
-
               children: [
                 TileLayer(
                   tileProvider: FileTileProvider(),
-                  urlTemplate: '$localPath/{z}/{x}/{y}.png',
+                  urlTemplate: '$_localPath/{z}/{x}/{y}.png',
                 ),
 
-                // رسم المسار
                 PolylineLayer(
                   polylines: [
                     Polyline(
-                      points: routePoints,
+                      points: widget.routePoints,
                       strokeWidth: 5,
                       color: Colors.cyanAccent,
                     ),
                   ],
                 ),
 
-                // الماركر الحالي
-                if (routePoints.isNotEmpty)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: routePoints.last,
-                        width: 40,
-                        height: 40,
-                        child: const Icon(
-                          Icons.navigation,
-                          color: Colors.red,
-                          size: 40,
-                        ),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: currentMarkerPoint,
+                      width: 50,
+                      height: 50,
+                      child: const Icon(
+                        Icons.location_on,
+                        color: Colors.red,
+                        size: 50,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
+                ),
               ],
             ),
     );
