@@ -1,14 +1,12 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
-
-import 'package:flutter_application_22/services/location_service.dart';
-
 import 'package:geolocator/geolocator.dart';
-
 import 'package:latlong2/latlong.dart';
-
 import 'map_page.dart';
+
+class TrackingData {
+  static List<LatLng> routePoints = [];
+}
 
 class TrackerPage extends StatefulWidget {
   const TrackerPage({super.key});
@@ -18,224 +16,260 @@ class TrackerPage extends StatefulWidget {
 }
 
 class _TrackerPageState extends State<TrackerPage> {
-  final LocationService _locationService = LocationService();
-
-  List<LatLng> routePoints = [];
-
   StreamSubscription<Position>? _positionStream;
+  Timer? _timer;
 
   double _totalDistance = 0.0;
-
+  double _currentSpeed = 0.0;
+  Duration _duration = Duration.zero;
   bool _isTracking = false;
 
-  void _toggleTracking() async {
-    if (_isTracking) {
-      await _positionStream?.cancel();
+  LatLng? _lastPoint;
+  DateTime? _lastTime;
 
-      setState(() {
-        _isTracking = false;
-      });
-
-      print("STOPPED");
-    } else {
-      bool hasPermission = await _locationService.requestPermission();
-
-      if (hasPermission) {
-        setState(() {
-          _isTracking = true;
-
-          routePoints.clear();
-
-          _totalDistance = 0.0;
-        });
-
-        _startStreaming();
-      }
-    }
-  }
-
-  void _startStreaming() async {
-    print("TRACKING STARTED");
-
-    Position firstPos = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.bestForNavigation,
-    );
-
-    routePoints.clear();
-
-    routePoints.add(LatLng(firstPos.latitude, firstPos.longitude));
-
-    _positionStream =
-        Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.bestForNavigation,
-
-            distanceFilter: 1,
-          ),
-        ).listen((pos) {
-          final newPoint = LatLng(pos.latitude, pos.longitude);
-
-          setState(() {
-            if (routePoints.isNotEmpty) {
-              double gap = Geolocator.distanceBetween(
-                routePoints.last.latitude,
-
-                routePoints.last.longitude,
-
-                newPoint.latitude,
-
-                newPoint.longitude,
-              );
-
-              print("GAP = $gap");
-
-              // FILTER بسيط
-
-              if (gap > 2 && gap < 50) {
-                _totalDistance += gap;
-
-                routePoints.add(newPoint);
-
-                print("DISTANCE = $_totalDistance");
-              }
-            } else {
-              routePoints.add(newPoint);
-            }
-          });
-        });
-  }
+  double _speedSmooth = 0.0;
 
   @override
   void dispose() {
     _positionStream?.cancel();
-
+    _timer?.cancel();
     super.dispose();
+  }
+
+  // ================= TIMER =================
+  void _startTimer() {
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() => _duration += const Duration(seconds: 1));
+      }
+    });
+  }
+
+  // ================= PERMISSION =================
+  Future<bool> _requestPermission() async {
+    final p = await Geolocator.requestPermission();
+    return p == LocationPermission.whileInUse || p == LocationPermission.always;
+  }
+
+  // ================= START / STOP =================
+  void _toggleTracking() async {
+    if (_isTracking) {
+      await _positionStream?.cancel();
+      _timer?.cancel();
+
+      setState(() => _isTracking = false);
+    } else {
+      final ok = await _requestPermission();
+      if (!ok) return;
+
+      setState(() {
+        _isTracking = true;
+
+        _totalDistance = 0.0;
+        _duration = Duration.zero;
+
+        TrackingData.routePoints.clear();
+
+        _lastPoint = null;
+        _lastTime = null;
+        _speedSmooth = 0.0;
+      });
+
+      _startTimer();
+      _startStreaming();
+    }
+  }
+
+  // ================= GPS STREAM =================
+  void _startStreaming() {
+    const settings = LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 0,
+    );
+
+    _positionStream = Geolocator.getPositionStream(locationSettings: settings)
+        .listen((pos) {
+          if (pos.accuracy > 30) return;
+
+          final newPoint = LatLng(pos.latitude, pos.longitude);
+          final now = DateTime.now();
+
+          // ================= FIRST POINT =================
+          if (_lastPoint == null) {
+            _lastPoint = newPoint;
+            _lastTime = now;
+
+            TrackingData.routePoints.add(newPoint);
+
+            setState(() {});
+            return;
+          }
+
+          // ================= DISTANCE =================
+          double gap = Geolocator.distanceBetween(
+            _lastPoint!.latitude,
+            _lastPoint!.longitude,
+            newPoint.latitude,
+            newPoint.longitude,
+          );
+
+          // ================= 🚨 FIX: BLOCK GPS JUMP (IMPORTANT) =================
+          if (gap > 50) {
+            // ignore fake GPS jump
+            _lastPoint = newPoint;
+            _lastTime = now;
+            return;
+          }
+
+          double timeSec = now.difference(_lastTime!).inMilliseconds / 1000;
+
+          // ================= SPEED =================
+          if (timeSec > 0 && gap > 1) {
+            double instantSpeed = (gap / timeSec) * 3.6;
+
+            if (instantSpeed < 130) {
+              _speedSmooth = (_speedSmooth * 0.8) + (instantSpeed * 0.2);
+              _currentSpeed = _speedSmooth;
+            }
+          }
+
+          if (_currentSpeed < 0.5) _currentSpeed = 0;
+
+          // ================= CHECKPOINT (5M RULE) =================
+          if (gap >= 5) {
+            _totalDistance += gap;
+
+            _lastPoint = newPoint;
+            _lastTime = now;
+
+            TrackingData.routePoints.add(newPoint);
+          }
+
+          setState(() {});
+        });
+  }
+
+  // ================= UI =================
+  String _formatDuration(Duration d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return "${two(d.inHours)}:${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}";
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
-
-      appBar: AppBar(
-        title: const Text("FAYOUM TRACKER"),
-
-        centerTitle: true,
-
-        backgroundColor: Colors.transparent,
-      ),
-
-      body: Center(
+      body: SafeArea(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-
           children: [
-            _buildStatCard(),
+            const SizedBox(height: 40),
 
-            const SizedBox(height: 50),
+            const Text(
+              "LIVE TRACKING",
+              style: TextStyle(color: Colors.cyanAccent, letterSpacing: 3),
+            ),
 
-            _buildControls(),
+            const SizedBox(height: 20),
+
+            // SPEED
+            Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.cyanAccent.withOpacity(0.2),
+                  width: 8,
+                ),
+              ),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _currentSpeed.toStringAsFixed(1),
+                      style: const TextStyle(
+                        fontSize: 60,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const Text("KM/H", style: TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 40),
+
+            // STATS
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _box("TIME", _formatDuration(_duration)),
+                _box(
+                  "DISTANCE",
+                  "${(_totalDistance / 1000).toStringAsFixed(2)} KM",
+                ),
+              ],
+            ),
+
+            const Spacer(),
+
+            // BUTTONS
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                GestureDetector(
+                  onTap: _toggleTracking,
+                  child: CircleAvatar(
+                    radius: 35,
+                    backgroundColor: _isTracking
+                        ? Colors.red
+                        : Colors.greenAccent,
+                    child: Icon(
+                      _isTracking ? Icons.stop : Icons.play_arrow,
+                      color: Colors.black,
+                      size: 40,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 30),
+                GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const MapPage()),
+                  ),
+                  child: const CircleAvatar(
+                    radius: 35,
+                    backgroundColor: Colors.blueAccent,
+                    child: Icon(Icons.map, color: Colors.white, size: 35),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 40),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStatCard() {
-    return Container(
-      width: 250,
-
-      height: 250,
-
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-
-        border: Border.all(color: Colors.cyanAccent.withOpacity(0.3), width: 2),
-      ),
-
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-
-        children: [
-          const Icon(Icons.directions_run, color: Colors.cyanAccent, size: 40),
-
-          Text(
-            "${(_totalDistance / 1000).toStringAsFixed(2)}",
-
-            style: const TextStyle(
-              fontSize: 48,
-
-              fontWeight: FontWeight.bold,
-
-              color: Colors.white,
-            ),
-          ),
-
-          const Text(
-            "KILOMETERS",
-
-            style: TextStyle(color: Colors.grey, letterSpacing: 2),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildControls() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-
+  Widget _box(String title, String value) {
+    return Column(
       children: [
-        _circleBtn(
-          icon: _isTracking ? Icons.stop : Icons.play_arrow,
-
-          color: _isTracking ? Colors.redAccent : Colors.greenAccent,
-
-          onTap: _toggleTracking,
-        ),
-
-        _circleBtn(
-          icon: Icons.map_outlined,
-
-          color: Colors.blueAccent,
-
-          onTap: () {
-            Navigator.push(
-              context,
-
-              MaterialPageRoute(
-                builder: (context) => MapPage(routePoints: routePoints),
-              ),
-            );
-          },
+        Text(title, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        const SizedBox(height: 8),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ],
-    );
-  }
-
-  Widget _circleBtn({
-    required IconData icon,
-
-    required Color color,
-
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-
-      child: Container(
-        padding: const EdgeInsets.all(20),
-
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-
-          shape: BoxShape.circle,
-
-          border: Border.all(color: color),
-        ),
-
-        child: Icon(icon, color: color, size: 30),
-      ),
     );
   }
 }
