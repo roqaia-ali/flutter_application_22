@@ -1,9 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
 import 'tracker.dart';
 
@@ -18,54 +17,51 @@ class _MapPageState extends State<MapPage> {
   final MapController _controller = MapController();
 
   StreamSubscription<Position>? _sub;
-  Timer? _uiTimer;
 
-  String? _path;
-  LatLng? _currentPos;
-  bool _follow = true;
+  String? _mapPath;
+  LatLng? _current;
 
   @override
   void initState() {
     super.initState();
-    initMap();
-    startGPS();
-    startUITimer();
+    _checkGPS();
+    _initOfflineMap();
+    _startGPS();
   }
 
-  Future<void> initMap() async {
+  Future<void> _checkGPS() async {
+    await Geolocator.requestPermission();
+  }
+
+  Future<void> _initOfflineMap() async {
     final dir = await getApplicationDocumentsDirectory();
-    _path = "${dir.path}/offline_maps";
-    setState(() {});
+    _mapPath = "${dir.path}/offline_maps";
+    if (mounted) setState(() {});
   }
 
-  /// 🔥 UI refresh slow (NOT GPS rebuild)
-  void startUITimer() {
-    _uiTimer = Timer.periodic(const Duration(milliseconds: 800), (_) {
-      if (mounted) setState(() {});
-    });
-  }
-
-  /// 🔥 GPS ONLY updates variables (NO setState here)
-  void startGPS() {
+  /// 🔥 GPS STREAM
+  void _startGPS() {
     _sub =
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 5,
+            distanceFilter: 2,
           ),
         ).listen((pos) {
-          _currentPos = LatLng(pos.latitude, pos.longitude);
+          final newPos = LatLng(pos.latitude, pos.longitude);
 
-          if (_follow && _currentPos != null) {
-            _controller.move(_currentPos!, _controller.camera.zoom);
-          }
+          setState(() {
+            _current = newPos;
+          });
+
+          /// ✅ CAMERA MOVE (CORRECT)
+          _controller.move(newPos, _controller.camera.zoom);
         });
   }
 
   @override
   void dispose() {
     _sub?.cancel();
-    _uiTimer?.cancel();
     super.dispose();
   }
 
@@ -75,59 +71,63 @@ class _MapPageState extends State<MapPage> {
         ? TrackingData.routePoints.last
         : const LatLng(29.3, 30.8);
 
+    if (_mapPath == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("LIVE MAP"),
-        actions: [
-          IconButton(
-            icon: Icon(_follow ? Icons.gps_fixed : Icons.gps_not_fixed),
-            onPressed: () => setState(() => _follow = !_follow),
+      appBar: AppBar(title: const Text("OFFLINE MAP")),
+
+      body: FlutterMap(
+        mapController: _controller, // 🔥 IMPORTANT FIX
+
+        options: MapOptions(
+          initialCenter: center,
+          initialZoom: 16,
+          interactionOptions: const InteractionOptions(
+            flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
           ),
-        ],
-      ),
+        ),
 
-      body: _path == null
-          ? const Center(child: CircularProgressIndicator())
-          : FlutterMap(
-              mapController: _controller,
-              options: MapOptions(initialCenter: center, initialZoom: 16),
-              children: [
-                /// 🗺 TILE LAYER (FIXED STABILITY)
-                TileLayer(
-                  tileProvider: FileTileProvider(),
-                  urlTemplate: "$_path/Fayom/{z}/{x}/{y}.png",
-                  keepBuffer: 3, // 🔥 important fix
-                ),
+        children: [
+          /// 🗺️ OFFLINE TILES
+          TileLayer(
+            tileProvider: FileTileProvider(),
+            urlTemplate: "$_mapPath/Fayom/{z}/{x}/{y}.png",
+            keepBuffer: 6,
+            maxZoom: 18,
+            minZoom: 12,
+          ),
 
-                /// 📍 POLYLINE (FAST COPY ONLY)
-                PolylineLayer(
-                  polylines: [
-                    Polyline(
-                      points: List<LatLng>.of(TrackingData.routePoints),
-                      strokeWidth: 5,
-                      color: Colors.red,
-                    ),
-                  ],
-                ),
+          /// 📍 ROUTE LINE
+          PolylineLayer(
+            polylines: [
+              Polyline(
+                points: List<LatLng>.from(TrackingData.routePoints),
+                strokeWidth: 5,
+                color: Colors.red,
+              ),
+            ],
+          ),
 
-                /// 📍 MARKER
-                if (_currentPos != null)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: _currentPos!,
-                        width: 50,
-                        height: 50,
-                        child: const Icon(
-                          Icons.location_pin,
-                          color: Colors.blue,
-                          size: 40,
-                        ),
-                      ),
-                    ],
+          /// 📍 CURRENT LOCATION
+          if (_current != null)
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: _current!,
+                  width: 45,
+                  height: 45,
+                  child: const Icon(
+                    Icons.location_pin,
+                    color: Colors.blue,
+                    size: 40,
                   ),
+                ),
               ],
             ),
+        ],
+      ),
     );
   }
 }
