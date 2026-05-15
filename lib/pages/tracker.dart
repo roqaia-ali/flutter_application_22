@@ -178,7 +178,7 @@ class _TrackerPageState extends State<TrackerPage> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: Colors.cyanAccent.withOpacity(0.2),
+                  color: Colors.cyanAccent.withValues(alpha:  0.2),
                   width: 8,
                 ),
               ),
