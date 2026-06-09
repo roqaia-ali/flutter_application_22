@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_22/services/location_service.dart';
+import 'package:flutter_application_22/services/tile_service.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:latlong2/latlong.dart';
+
 import 'tracker.dart';
 
 class MapPage extends StatefulWidget {
@@ -15,6 +17,8 @@ class MapPage extends StatefulWidget {
 
 class _MapPageState extends State<MapPage> {
   final MapController _controller = MapController();
+  final LocationService _locationService =
+      LocationService(); // 🔥 IMPORT SERVICE
 
   StreamSubscription<Position>? _sub;
 
@@ -24,38 +28,42 @@ class _MapPageState extends State<MapPage> {
   @override
   void initState() {
     super.initState();
-    _checkGPS();
-    _initOfflineMap();
+    _init();
+  }
+
+  // ================= INIT =================
+  Future<void> _init() async {
+    await _checkGPS();
+    await _loadMapPath();
     _startGPS();
   }
 
+  // ================= PERMISSION (via service) =================
   Future<void> _checkGPS() async {
-    await Geolocator.requestPermission();
+    await _locationService.requestPermission(); // 🔥 using service
   }
 
-  Future<void> _initOfflineMap() async {
-    final dir = await getApplicationDocumentsDirectory();
-    _mapPath = "${dir.path}/offline_maps";
+  Future<void> _loadMapPath() async {
+    _mapPath = await MapLoader.getLocalPath();
     if (mounted) setState(() {});
   }
 
-  /// 🔥 GPS STREAM
+  // ================= GPS STREAM =================
   void _startGPS() {
     _sub =
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 2,
+            distanceFilter: 5,
           ),
         ).listen((pos) {
           final newPos = LatLng(pos.latitude, pos.longitude);
 
-          setState(() {
-            _current = newPos;
-          });
+          _current = newPos;
 
-          /// ✅ CAMERA MOVE (CORRECT)
-          _controller.move(newPos, _controller.camera.zoom);
+          _controller.move(newPos, 16);
+
+          if (mounted) setState(() {});
         });
   }
 
@@ -65,6 +73,7 @@ class _MapPageState extends State<MapPage> {
     super.dispose();
   }
 
+  // ================= UI =================
   @override
   Widget build(BuildContext context) {
     final center = TrackingData.routePoints.isNotEmpty
@@ -79,7 +88,7 @@ class _MapPageState extends State<MapPage> {
       appBar: AppBar(title: const Text("OFFLINE MAP")),
 
       body: FlutterMap(
-        mapController: _controller, // 🔥 IMPORTANT FIX
+        mapController: _controller,
 
         options: MapOptions(
           initialCenter: center,
@@ -90,16 +99,16 @@ class _MapPageState extends State<MapPage> {
         ),
 
         children: [
-          /// 🗺️ OFFLINE TILES
           TileLayer(
             tileProvider: FileTileProvider(),
             urlTemplate: "$_mapPath/Fayom/{z}/{x}/{y}.png",
-            keepBuffer: 6,
+            errorTileCallback: (tile, error, stackTrace) {
+              // ignore missing tiles
+            },
             maxZoom: 18,
             minZoom: 12,
           ),
 
-          /// 📍 ROUTE LINE
           PolylineLayer(
             polylines: [
               Polyline(
@@ -110,7 +119,6 @@ class _MapPageState extends State<MapPage> {
             ],
           ),
 
-          /// 📍 CURRENT LOCATION
           if (_current != null)
             MarkerLayer(
               markers: [

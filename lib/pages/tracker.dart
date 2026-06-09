@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_22/services/location_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'map_page.dart';
@@ -22,12 +23,14 @@ class _TrackerPageState extends State<TrackerPage> {
   double _totalDistance = 0.0;
   double _currentSpeed = 0.0;
   Duration _duration = Duration.zero;
+
   bool _isTracking = false;
 
   LatLng? _lastPoint;
   DateTime? _lastTime;
 
   double _speedSmooth = 0.0;
+  final LocationService _locationService = LocationService();
 
   @override
   void dispose() {
@@ -38,17 +41,15 @@ class _TrackerPageState extends State<TrackerPage> {
 
   // ================= TIMER =================
   void _startTimer() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) {
-        setState(() => _duration += const Duration(seconds: 1));
-      }
-    });
-  }
+    _timer?.cancel();
 
-  // ================= PERMISSION =================
-  Future<bool> _requestPermission() async {
-    final p = await Geolocator.requestPermission();
-    return p == LocationPermission.whileInUse || p == LocationPermission.always;
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _duration += const Duration(seconds: 1);
+      });
+    });
   }
 
   // ================= START / STOP =================
@@ -59,7 +60,7 @@ class _TrackerPageState extends State<TrackerPage> {
 
       setState(() => _isTracking = false);
     } else {
-      final ok = await _requestPermission();
+      final ok = await _locationService.requestPermission();
       if (!ok) return;
 
       setState(() {
@@ -82,7 +83,7 @@ class _TrackerPageState extends State<TrackerPage> {
 
   // ================= GPS STREAM =================
   void _startStreaming() {
-    const settings = LocationSettings(
+    final settings = LocationSettings(
       accuracy: LocationAccuracy.bestForNavigation,
       distanceFilter: 0,
     );
@@ -94,61 +95,61 @@ class _TrackerPageState extends State<TrackerPage> {
           final newPoint = LatLng(pos.latitude, pos.longitude);
           final now = DateTime.now();
 
-          // ================= FIRST POINT =================
           if (_lastPoint == null) {
             _lastPoint = newPoint;
             _lastTime = now;
 
             TrackingData.routePoints.add(newPoint);
 
-            setState(() {});
+            if (mounted) setState(() {});
             return;
           }
 
-          // ================= DISTANCE =================
-          double gap = Geolocator.distanceBetween(
+          final gap = Geolocator.distanceBetween(
             _lastPoint!.latitude,
             _lastPoint!.longitude,
             newPoint.latitude,
             newPoint.longitude,
           );
 
-          // ================= 🚨 FIX: BLOCK GPS JUMP (IMPORTANT) =================
-          if (gap > 50) {
-            // ignore fake GPS jump
-            _lastPoint = newPoint;
-            _lastTime = now;
-            return;
-          }
+          // ignore  GPS jumps
+          if (gap > 100) return;
 
-          double timeSec = now.difference(_lastTime!).inMilliseconds / 1000;
+          final timeSec = now.difference(_lastTime!).inMilliseconds / 1000;
 
-          // ================= SPEED =================
-          if (timeSec > 0 && gap > 1) {
-            double instantSpeed = (gap / timeSec) * 3.6;
+          if (timeSec > 0) {
+            final instantSpeed = (gap / timeSec) * 3.6;
 
             if (instantSpeed < 130) {
               _speedSmooth = (_speedSmooth * 0.8) + (instantSpeed * 0.2);
+
               _currentSpeed = _speedSmooth;
             }
           }
 
-          if (_currentSpeed < 0.5) _currentSpeed = 0;
+          if (_currentSpeed < 0.5) {
+            _currentSpeed = 0;
+          }
 
-          // ================= CHECKPOINT (5M RULE) =================
-          if (gap >= 5) {
+          // Add point to route
+         if (gap >= 5) {
             _totalDistance += gap;
+
+            TrackingData.routePoints.add(newPoint);
+
+            print("Points = ${TrackingData.routePoints.length}");
 
             _lastPoint = newPoint;
             _lastTime = now;
-
-            TrackingData.routePoints.add(newPoint);
           }
 
-          setState(() {});
+          if (mounted) {
+            setState(() {});
+          }
         });
+        
   }
-
+  
   // ================= UI =================
   String _formatDuration(Duration d) {
     String two(int n) => n.toString().padLeft(2, '0');
@@ -171,7 +172,6 @@ class _TrackerPageState extends State<TrackerPage> {
 
             const SizedBox(height: 20),
 
-            // SPEED
             Container(
               width: 200,
               height: 200,
@@ -202,7 +202,6 @@ class _TrackerPageState extends State<TrackerPage> {
 
             const SizedBox(height: 40),
 
-            // STATS
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -216,7 +215,6 @@ class _TrackerPageState extends State<TrackerPage> {
 
             const Spacer(),
 
-            // BUTTONS
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -235,6 +233,7 @@ class _TrackerPageState extends State<TrackerPage> {
                   ),
                 ),
                 const SizedBox(width: 30),
+
                 GestureDetector(
                   onTap: () => Navigator.push(
                     context,

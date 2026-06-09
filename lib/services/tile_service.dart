@@ -4,56 +4,52 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 class MapLoader {
-  
   static Future<String> getLocalPath() async {
     final directory = await getApplicationDocumentsDirectory();
     return '${directory.path}/offline_maps';
   }
 
-  
   static Future<void> extractMapZip() async {
     try {
       final localPath = await getLocalPath();
       final dir = Directory(localPath);
 
-      if (await dir.exists()) {
-        print("Maps already extracted.");
-        return;
+      // 🔥 IMPORTANT FIX: always ensure clean extraction
+      if (dir.existsSync()) {
+        await dir.delete(recursive: true);
       }
+      await dir.create(recursive: true);
 
       print("Starting extraction...");
 
-      
       ByteData data = await rootBundle.load('assets/tiles_map.zip');
-      List<int> bytes = data.buffer.asUint8List(
-        data.offsetInBytes,
-        data.lengthInBytes,
-      );
-      
-      Archive archive = ZipDecoder().decodeBytes(bytes);
+      final bytes = data.buffer.asUint8List();
 
-      for (ArchiveFile file in archive) {
-        String filename = '$localPath/${file.name}';
+      final archive = ZipDecoder().decodeBytes(bytes);
+
+      for (final file in archive) {
+        final path = '$localPath/${file.name}';
+
         if (file.isFile) {
-          final data = file.content as List<int>;
-          File(filename)
-            ..createSync(recursive: true)
-            ..writeAsBytesSync(data);
+          final outFile = File(path);
+          await outFile.create(recursive: true);
+          await outFile.writeAsBytes(file.content as List<int>);
         } else {
-          Directory(filename).createSync(recursive: true);
+          await Directory(path).create(recursive: true);
         }
       }
+
       print("Map Extracted Successfully!");
     } catch (e) {
       print("Error extracting map: $e");
     }
   }
 
-  // 3. دالة لمسح الخرائط (إذا أردت توفير مساحة للمستخدم لاحقاً)
   static Future<void> clearCache() async {
     final localPath = await getLocalPath();
     final dir = Directory(localPath);
-    if (await dir.exists()) {
+
+    if (dir.existsSync()) {
       await dir.delete(recursive: true);
     }
   }
