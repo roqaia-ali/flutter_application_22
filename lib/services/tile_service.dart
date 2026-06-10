@@ -14,7 +14,7 @@ class MapLoader {
       final localPath = await getLocalPath();
       final dir = Directory(localPath);
 
-      // 🔥 IMPORTANT FIX: always ensure clean extraction
+      // always ensure clean extraction
       if (dir.existsSync()) {
         await dir.delete(recursive: true);
       }

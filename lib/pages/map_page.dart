@@ -18,7 +18,7 @@ class MapPage extends StatefulWidget {
 class _MapPageState extends State<MapPage> {
   final MapController _controller = MapController();
   final LocationService _locationService =
-      LocationService(); // 🔥 IMPORT SERVICE
+      LocationService(); 
 
   StreamSubscription<Position>? _sub;
 
@@ -31,16 +31,16 @@ class _MapPageState extends State<MapPage> {
     _init();
   }
 
-  // ================= INIT =================
+  // == init function ==
   Future<void> _init() async {
     await _checkGPS();
     await _loadMapPath();
     _startGPS();
   }
 
-  // ================= PERMISSION (via service) =================
+  // == permission ==
   Future<void> _checkGPS() async {
-    await _locationService.requestPermission(); // 🔥 using service
+    await _locationService.requestPermission();
   }
 
   Future<void> _loadMapPath() async {
@@ -48,12 +48,12 @@ class _MapPageState extends State<MapPage> {
     if (mounted) setState(() {});
   }
 
-  // ================= GPS STREAM =================
+  // == stream to gps ==
   void _startGPS() {
     _sub =
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.bestForNavigation,
+            accuracy: LocationAccuracy.best,
             distanceFilter: 5,
           ),
         ).listen((pos) {

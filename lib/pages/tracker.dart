@@ -39,7 +39,7 @@ class _TrackerPageState extends State<TrackerPage> {
     super.dispose();
   }
 
-  // ================= TIMER =================
+  // == timer ==
   void _startTimer() {
     _timer?.cancel();
 
@@ -52,7 +52,7 @@ class _TrackerPageState extends State<TrackerPage> {
     });
   }
 
-  // ================= START / STOP =================
+  // === start/stop toggling ==
   void _toggleTracking() async {
     if (_isTracking) {
       await _positionStream?.cancel();
@@ -81,11 +81,11 @@ class _TrackerPageState extends State<TrackerPage> {
     }
   }
 
-  // ================= GPS STREAM =================
+  //== stream to gps ==
   void _startStreaming() {
     final settings = LocationSettings(
-      accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 0,
+      accuracy: LocationAccuracy.best,
+      distanceFilter: 5,
     );
 
     _positionStream = Geolocator.getPositionStream(locationSettings: settings)
@@ -112,15 +112,18 @@ class _TrackerPageState extends State<TrackerPage> {
             newPoint.longitude,
           );
 
-          // ignore  GPS jumps
+          // ignore  gps jumps
           if (gap > 100) return;
 
           final timeSec = now.difference(_lastTime!).inMilliseconds / 1000;
 
           if (timeSec > 0) {
             final instantSpeed = (gap / timeSec) * 3.6;
-
-            if (instantSpeed < 130) {
+           // ignore unecxpected speed in walking
+           print("gap = $gap");
+           print("time sec = $timeSec");
+           print("speed = $instantSpeed");
+            if (instantSpeed < 40) {
               _speedSmooth = (_speedSmooth * 0.8) + (instantSpeed * 0.2);
 
               _currentSpeed = _speedSmooth;
@@ -131,7 +134,7 @@ class _TrackerPageState extends State<TrackerPage> {
             _currentSpeed = 0;
           }
 
-          // Add point to route
+          // add point to route
          if (gap >= 5) {
             _totalDistance += gap;
 

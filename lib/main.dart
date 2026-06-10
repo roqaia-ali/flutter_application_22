@@ -5,8 +5,7 @@ import 'package:flutter_application_22/services/tile_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await MapLoader.extractMapZip(); // فك الخريطة
-  // لضمان استقرار الخدمات قبل تشغيل التطبيق
+  await MapLoader.extractMapZip(); //  extract map
   
   runApp(const FayoumTrackerApp());
 }
@@ -20,20 +19,18 @@ class FayoumTrackerApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Fayoum University Tracker',
 
-      // إعدادات الثيم الاحترافي (High Contrast Dark Theme)
       theme: ThemeData(
-        useMaterial3: true,
+        //useMaterial3: true,
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0A0A0A), // أسود عميق
-        // تنسيق الخطوط والألوان العامة
+        scaffoldBackgroundColor: const Color(0xFF0A0A0A), 
+
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.cyanAccent,
           brightness: Brightness.dark,
           primary: Colors.cyanAccent,
           surface: const Color(0xFF121212),
         ),
-
-        // تنسيق الـ AppBar ليكون شفاف ومتناسق
+  
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -47,7 +44,6 @@ class FayoumTrackerApp extends StatelessWidget {
         ),
       ),
 
-      // الصفحة اللي التطبيق بيبدأ منها
       home: const TrackerPage(),
     );
   }
