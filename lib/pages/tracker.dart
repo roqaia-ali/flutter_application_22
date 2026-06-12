@@ -23,13 +23,17 @@ class _TrackerPageState extends State<TrackerPage> {
   double _totalDistance = 0.0;
   double _currentSpeed = 0.0;
   Duration _duration = Duration.zero;
-
   bool _isTracking = false;
 
-  LatLng? _lastPoint;
-  DateTime? _lastTime;
+  
+  LatLng? _lastSpeedPoint;
+  DateTime? _lastSpeedTime;
+
+  
+  LatLng? _lastDistancePoint;
 
   double _speedSmooth = 0.0;
+
   final LocationService _locationService = LocationService();
 
   @override
@@ -39,7 +43,7 @@ class _TrackerPageState extends State<TrackerPage> {
     super.dispose();
   }
 
-  // == timer ==
+  
   void _startTimer() {
     _timer?.cancel();
 
@@ -52,13 +56,15 @@ class _TrackerPageState extends State<TrackerPage> {
     });
   }
 
-  // === start/stop toggling ==
+  
   void _toggleTracking() async {
     if (_isTracking) {
       await _positionStream?.cancel();
       _timer?.cancel();
 
-      setState(() => _isTracking = false);
+      setState(() {
+        _isTracking = false;
+      });
     } else {
       final ok = await _locationService.requestPermission();
       if (!ok) return;
@@ -67,13 +73,16 @@ class _TrackerPageState extends State<TrackerPage> {
         _isTracking = true;
 
         _totalDistance = 0.0;
+        _currentSpeed = 0.0;
         _duration = Duration.zero;
 
-        TrackingData.routePoints.clear();
+        _lastSpeedPoint = null;
+        _lastSpeedTime = null;
+        _lastDistancePoint = null;
 
-        _lastPoint = null;
-        _lastTime = null;
         _speedSmooth = 0.0;
+
+        TrackingData.routePoints.clear();
       });
 
       _startTimer();
@@ -81,23 +90,29 @@ class _TrackerPageState extends State<TrackerPage> {
     }
   }
 
-  //== stream to gps ==
+  
   void _startStreaming() {
-    final settings = LocationSettings(
-      accuracy: LocationAccuracy.best,
-      distanceFilter: 5,
+    const settings = LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 0,
     );
 
     _positionStream = Geolocator.getPositionStream(locationSettings: settings)
         .listen((pos) {
+          if (!_isTracking) return;
+
+          
           if (pos.accuracy > 30) return;
 
           final newPoint = LatLng(pos.latitude, pos.longitude);
+
           final now = DateTime.now();
 
-          if (_lastPoint == null) {
-            _lastPoint = newPoint;
-            _lastTime = now;
+          
+          if (_lastSpeedPoint == null) {
+            _lastSpeedPoint = newPoint;
+            _lastSpeedTime = now;
+            _lastDistancePoint = newPoint;
 
             TrackingData.routePoints.add(newPoint);
 
@@ -105,28 +120,37 @@ class _TrackerPageState extends State<TrackerPage> {
             return;
           }
 
-          final gap = Geolocator.distanceBetween(
-            _lastPoint!.latitude,
-            _lastPoint!.longitude,
+          
+
+          final speedGap = Geolocator.distanceBetween(
+            _lastSpeedPoint!.latitude,
+            _lastSpeedPoint!.longitude,
             newPoint.latitude,
             newPoint.longitude,
           );
 
-          // ignore  gps jumps
-          if (gap > 100) return;
+          
+          if (speedGap > 100) {
+            _lastSpeedPoint = newPoint;
+            _lastSpeedTime = now;
+            return;
+          }
 
-          final timeSec = now.difference(_lastTime!).inMilliseconds / 1000;
+          final timeSec = now.difference(_lastSpeedTime!).inMilliseconds / 1000;
 
-          if (timeSec > 0) {
-            final instantSpeed = (gap / timeSec) * 3.6;
-           // ignore unecxpected speed in walking
-           print("gap = $gap");
-           print("time sec = $timeSec");
-           print("speed = $instantSpeed");
+          
+          _lastSpeedPoint = newPoint;
+          _lastSpeedTime = now;
+
+          if (timeSec > 0 && speedGap > 0) {
+            final instantSpeed = (speedGap / timeSec) * 3.6;
+
+            
             if (instantSpeed < 40) {
               _speedSmooth = (_speedSmooth * 0.8) + (instantSpeed * 0.2);
 
               _currentSpeed = _speedSmooth;
+              
             }
           }
 
@@ -134,31 +158,43 @@ class _TrackerPageState extends State<TrackerPage> {
             _currentSpeed = 0;
           }
 
-          // add point to route
-         if (gap >= 5) {
-            _totalDistance += gap;
+        
+
+          final distGap = Geolocator.distanceBetween(
+            _lastDistancePoint!.latitude,
+            _lastDistancePoint!.longitude,
+            newPoint.latitude,
+            newPoint.longitude,
+          );
+
+          
+          if (distGap >= 3) {
+            _totalDistance += distGap;
 
             TrackingData.routePoints.add(newPoint);
 
-            print("Points = ${TrackingData.routePoints.length}");
+            _lastDistancePoint = newPoint;
 
-            _lastPoint = newPoint;
-            _lastTime = now;
+            print("Distance = $_totalDistance");
+            print("Points = ${TrackingData.routePoints.length}");
           }
 
           if (mounted) {
             setState(() {});
           }
         });
-        
-  }
-  
-  // ================= UI =================
-  String _formatDuration(Duration d) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return "${two(d.inHours)}:${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}";
   }
 
+  
+  String _formatDuration(Duration d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+
+    return "${two(d.inHours)}:"
+        "${two(d.inMinutes.remainder(60))}:"
+        "${two(d.inSeconds.remainder(60))}";
+  }
+
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -181,7 +217,7 @@ class _TrackerPageState extends State<TrackerPage> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: Colors.cyanAccent.withValues(alpha:  0.2),
+                  color: Colors.cyanAccent.withValues(alpha: 0.2),
                   width: 8,
                 ),
               ),
@@ -235,13 +271,16 @@ class _TrackerPageState extends State<TrackerPage> {
                     ),
                   ),
                 ),
+
                 const SizedBox(width: 30),
 
                 GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const MapPage()),
-                  ),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const MapPage()),
+                    );
+                  },
                   child: const CircleAvatar(
                     radius: 35,
                     backgroundColor: Colors.blueAccent,
